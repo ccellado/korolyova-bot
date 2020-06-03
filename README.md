@@ -1,4 +1,4 @@
-<img src="korolyaova_big.jpg" align="right" width="25%"/>
+<img src="small.png" align="right" width="100%"/>
 
 # korolyova-bot
 
