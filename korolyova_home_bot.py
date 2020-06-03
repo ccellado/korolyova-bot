@@ -24,7 +24,7 @@ def get_date():
 
 def print_csv(bot, update):
     locale.setlocale(locale.LC_ALL, "ru_RU.utf8")
-    with open("house.csv") as csvfile:
+    with open("local/house.csv") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
             daterus = datetime.date.fromisoformat(row["Date"])

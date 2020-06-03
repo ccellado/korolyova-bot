@@ -1,3 +1,5 @@
+<img src="korolyaova_big.jpg" align="right" width="25%"/>
+
 # korolyova-bot
 
 Python bot for the Moscow, Korolyova st. X flat XX.
