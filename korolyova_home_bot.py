@@ -3,6 +3,7 @@ import datetime
 import locale
 import logging
 import re
+import os
 
 from telegram.ext import CommandHandler, Updater
 
@@ -64,6 +65,30 @@ def start(bot, update):
     text = rofl + " Пора чинить стиральную машину! " + rofl + date
     bot.send_message(chat_id=chat_id, text=text)
 
+def stove_last(bot, update):
+    directory = "local"
+    filename = "stove.csv"
+    path = os.path.join(directory, filename)
+    if filename not in os.listdir(directory):
+        text = "Записей нет. Самое время помыть плиту!"
+    else:
+        with open(path) as csvfile:
+            reader = csv.DictReader(csvfile)
+            row = reader[-1]
+            daterus = datetime.date.fromisoformat(row["Date"])
+            text = f"{daterus} {row[person]}"
+    bot.send_message(chat_id=chat_id, text=text)
+
+def stove_add(bot, update, context):
+    directory = "local"
+    filename = "stove.csv"
+    path = os.path.join(directory, filename)
+    if filename not in os.listdir(directory):
+        mode = 'w'
+    else:
+        mode = 'a'
+    with open(path, mode) as csvfile:
+        csvfile.write(','.join(context.args))
 
 def main():
     updater = Updater(TOKEN)
@@ -71,6 +96,8 @@ def main():
     dp.add_handler(CommandHandler("bop", bop))
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("house", print_csv))
+    dp.add_handler(CommandHandler("stove_last", stove_last))
+    dp.add_handler(CommandHandler("stove_add", stove_add))
     updater.start_polling()
     updater.idle()
 
