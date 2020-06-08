@@ -30,13 +30,50 @@ def print_csv(bot, update):
         for row in reader:
             daterus = datetime.date.fromisoformat(row["Date"])
             datefinal = daterus.strftime(" %B %Y ")
-            hot = " Горячая вода : " + row["Hot Water"] + " кубов "
-            cold = " Холодная вода : " + row["Cold Water"] + " кубов "
-            elec = " Электричество : " + row["Electricity"] + " кВт "
+            hot = " Горячая вода : " + row["hot_water"] + " кубов "
+            cold = " Холодная вода : " + row["cold_water"] + " кубов "
+            elec = " Электричество : " + row["electricity"] + " кВт "
             chat_id = update.message.chat_id
             text = datefinal + cold + hot + elec
             bot.send_message(chat_id=chat_id, text=text)
 
+def house_payment(bot, update):
+    locale.setlocale(locale.LC_ALL, "ru_RU.utf8")
+    with open("local/house.csv") as csvfile:
+        reader = csv.DictReader(csvfile)
+        rows = [row for row in reader]
+    with open("rates.json") as rates_file:
+        rates = eval(rates_file.read())
+    current, last = rows[-1], rows[-2]
+    delta = {}
+    for key in ["hot_water", "cold_water", "electricity"]:
+        delta[key] = float(current[key]) - float(last[key])
+    delta['drain'] = delta['cold_water'] + delta['hot_water'] 
+    
+    total_sum = 0
+    total_sum += rates['gas']
+    total_sum += rates['door']
+    total_sum += rates['electricity'] * delta['electricity']
+    total_sum += (rates['cold_water'] + rates['drain']) * delta['cold_water']
+    total_sum += (rates['hot_water'] + rates['drain']) * delta['hot_water']
+    
+    output = ""
+    for name, key in zip(["Gas", "Door"], ['gas', 'door']):
+        output += f"{name:12}: {rates[key]:24.2f}"
+        output += '\n'
+    
+    names = ["Electricity", "Cold water", "Hot water", "Drain"]
+    keys = [x.lower().replace(' ', '_') for x in names]
+    for name, key in zip(names, keys):
+        output += f"{name:12}: {rates[key]:6.2f} * {delta[key]:6.2f}"
+        output += f" = {(rates[key] * delta[key]):6.2f}"
+        output += '\n'
+    output += '-' * 38
+    output += '\n'
+    output += f"{'Total':12}: {total_sum:24.2f}"
+    bot.send_message(chat_id=chat_id, text=output)
+
+    
 
 def get_url():
     contents = requests.get("https://random.dog/woof.json").json()
@@ -90,6 +127,9 @@ def stove_add(bot, update, context):
     with open(path, mode) as csvfile:
         csvfile.write(','.join(context.args))
 
+
+
+
 def main():
     updater = Updater(TOKEN)
     dp = updater.dispatcher
@@ -98,6 +138,7 @@ def main():
     dp.add_handler(CommandHandler("house", print_csv))
     dp.add_handler(CommandHandler("stove_last", stove_last))
     dp.add_handler(CommandHandler("stove_add", stove_add))
+    dp.add_handler(CommandHandler("house_payment", house_payment))
     updater.start_polling()
     updater.idle()
 
