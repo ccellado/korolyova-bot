@@ -4,76 +4,114 @@ import locale
 import logging
 import re
 import os
-
-from telegram.ext import CommandHandler, Updater
-
 import requests
+import pytz
+
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import (
+    Updater,
+    CommandHandler,
+    MessageHandler,
+    Filters,
+    ConversationHandler,
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
-# Openweathermap Weather codes and corressponding emojis
-rofl = u"\U0001F602"  # Code: 200's, 900, 901, 902, 905
+MENU, HOUSE, RATES, STOVEADD, STOVE = range(5)
+
+reply_keyboard = [["Коммуналка", "Данные с счётчиков"], ["Плита помыта",
+                   "Когда мыли плиту"]]
+markup = ReplyKeyboardMarkup(
+    reply_keyboard, resize_keyboard=True, one_time_keyboard=True
+)
+
+emoji = {
+    "angry_face": "\U0001F620",
+    "rofl": "\U0001F602",
+    "fire": "\U0001F525",
+    "frost": "\U00002744",
+    "droplet": "\U0001F4A7",
+    "energy": "\U000026A1",
+}
+
+timezone_local = pytz.timezone("Europe/Moscow")
+timezone_offset = "+0300"
+
 with open("local/token", "r") as tmp:
     TOKEN = tmp.read().replace("\n", "")
 
-def get_date():
-    today = datetime.date.today()
+
+def get_today():
+    today = datetime.datetime.now(timezone_local)
     return today
 
 
-def print_csv(bot, update):
+def get_today_rus(args):
     locale.setlocale(locale.LC_ALL, "ru_RU.utf8")
+    today = get_today().strftime(args)
+    return today
+
+
+def print_csv(update, context):
+    locale.setlocale(locale.LC_ALL, "en_US.utf8")
+    e_coldw = emoji['frost'] + emoji['droplet']
+    e_hotw = emoji['fire'] + emoji['droplet']
+    e_elec = emoji['energy']
     with open("local/house.csv") as csvfile:
         reader = csv.DictReader(csvfile)
+        text = "```\n"
+        text += f"{'Date':10}| {e_coldw:7}| {e_hotw:7}| {e_elec:8}\n"
+        text += '-' * 35 + '\n'
         for row in reader:
-            daterus = datetime.date.fromisoformat(row["Date"])
-            datefinal = daterus.strftime(" %B %Y ")
-            hot = " Горячая вода : " + row["hot_water"] + " кубов "
-            cold = " Холодная вода : " + row["cold_water"] + " кубов "
-            elec = " Электричество : " + row["electricity"] + " кВт "
-            chat_id = update.message.chat_id
-            text = datefinal + cold + hot + elec
-            bot.send_message(chat_id=chat_id, text=text)
+            datefinal = datetime.datetime.strptime(row["date"],
+                                                    "%Y-%m-%d").strftime("%y %b %-d")
+            hot, cold, elec = row["hot_water"], row["cold_water"], row["electricity"]
+            text += f"{datefinal:10}| {cold:7}| {hot:7}| {elec:8}\n"
+        text += '```\n'
+        update.message.reply_text(text=text, parse_mode="MarkdownV2")
 
-def house_payment(bot, update):
+    return MENU
+
+
+def house_payment(update, context):
     locale.setlocale(locale.LC_ALL, "ru_RU.utf8")
     with open("local/house.csv") as csvfile:
         reader = csv.DictReader(csvfile)
         rows = [row for row in reader]
-    with open("rates.json") as rates_file:
+    with open("local/rates.json") as rates_file:
         rates = eval(rates_file.read())
     current, last = rows[-1], rows[-2]
     delta = {}
     for key in ["hot_water", "cold_water", "electricity"]:
         delta[key] = float(current[key]) - float(last[key])
-    delta['drain'] = delta['cold_water'] + delta['hot_water'] 
-    
-    total_sum = 0
-    total_sum += rates['gas']
-    total_sum += rates['door']
+    delta['drain'] = delta['cold_water'] + delta['hot_water']
+
+    total_sum = rates['gas'] + rates['door']
     total_sum += rates['electricity'] * delta['electricity']
     total_sum += (rates['cold_water'] + rates['drain']) * delta['cold_water']
     total_sum += (rates['hot_water'] + rates['drain']) * delta['hot_water']
-    
-    output = ""
-    for name, key in zip(["Gas", "Door"], ['gas', 'door']):
-        output += f"{name:12}: {rates[key]:24.2f}"
-        output += '\n'
-    
-    names = ["Electricity", "Cold water", "Hot water", "Drain"]
-    keys = [x.lower().replace(' ', '_') for x in names]
-    for name, key in zip(names, keys):
-        output += f"{name:12}: {rates[key]:6.2f} * {delta[key]:6.2f}"
-        output += f" = {(rates[key] * delta[key]):6.2f}"
-        output += '\n'
-    output += '-' * 38
-    output += '\n'
-    output += f"{'Total':12}: {total_sum:24.2f}"
-    bot.send_message(chat_id=chat_id, text=output)
 
-    
+    output = "```\n"
+    for name, key in zip(["Gas", "Door"], ['gas', 'door']):
+        output += f"{name:7}: {rates[key]:21.2f}\n"
+
+    names = ["Electr", "Cwater", "Hwater", "Drain"]
+    keys = ["electricity", "cold_water", "hot_water", "drain"]
+    #keys = [x.lower().replace(' ', '_') for x in names]
+    for name, key in zip(names, keys):
+        output += f"{name:7}: {rates[key]:6.2f} * {delta[key]:3.0f}"
+        output += f" = {(rates[key] * delta[key]):6.2f}\n"
+    output += '-' * 30 + '\n'
+    output += f"{'Total':7}: {total_sum:21.2f}\n"
+    output += "```"
+    update.message.reply_text(text=output, parse_mode="MarkdownV2")
+
+    return MENU
+
 
 def get_url():
     contents = requests.get("https://random.dog/woof.json").json()
@@ -96,27 +134,42 @@ def bop(bot, update):
     bot.send_photo(chat_id=chat_id, photo=url)
 
 
-def start(bot, update):
-    chat_id = update.message.chat_id
-    date = get_date().isoformat()
-    text = rofl + " Пора чинить стиральную машину! " + rofl + date
-    bot.send_message(chat_id=chat_id, text=text)
+def start(update, context):
+    rofl = emoji['rofl']
+    reply_text = (rofl + " Слава героям Донбасса! " + rofl)
+    update.message.reply_text(reply_text, reply_markup=markup)
 
-def stove_last(bot, update):
+    return MENU
+
+
+def check_name(name):
+    if (name == "Taika"):
+        return "Денис"
+    else:
+        return name
+
+
+def stove_last(update, context):
     directory = "local"
     filename = "stove.csv"
-    path = os.path.join(directory, filename)
     if filename not in os.listdir(directory):
         text = "Записей нет. Самое время помыть плиту!"
     else:
-        with open(path) as csvfile:
+        with open(directory + '/' + filename) as csvfile:
             reader = csv.DictReader(csvfile)
-            row = reader[-1]
-            daterus = datetime.date.fromisoformat(row["Date"])
-            text = f"{daterus} {row[person]}"
-    bot.send_message(chat_id=chat_id, text=text)
+            rows = [row for row in reader]
+            text = ' '.join(rows[-1])
+    update.message.reply_text(text)
 
-def stove_add(bot, update, context):
+    return MENU
+
+def stove_add(update, context):
+    reply_text = "Помыл плиту? (Да/Нет/Затрудняюсь ответить)"
+    update.message.reply_text(reply_text)
+
+    return STOVEADD
+
+def stove_add_answer(update, context):
     directory = "local"
     filename = "stove.csv"
     path = os.path.join(directory, filename)
@@ -124,21 +177,53 @@ def stove_add(bot, update, context):
         mode = 'w'
     else:
         mode = 'a'
-    with open(path, mode) as csvfile:
-        csvfile.write(','.join(context.args))
+    answer = update.message.text
+    if (answer == "Да" or answer == "да"):
+        user = check_name(update.message.from_user.first_name)
+        with open(path, mode) as csvfile:
+            date = get_today().isoformat()
+            csvfile.write(date + ',' + user + '\n')
+        reply_text = "Умница!"
+    elif (answer == "Нет" or answer == "нет"):
+        reply_text = "Ну ка пошёл мыть плиту " + emoji['angry_face']
+    else:
+        reply_text = "Так Да или Нет? Давай снова :^)"
+    update.message.reply_text(reply_text)
 
+    return MENU
 
+def error(update, context):
+    """Log Errors caused by Updates."""
+    logger.warning('Update "%s" caused error "%s"', update, context.error)
 
 
 def main():
-    updater = Updater(TOKEN)
+    updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
-    dp.add_handler(CommandHandler("bop", bop))
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("house", print_csv))
-    dp.add_handler(CommandHandler("stove_last", stove_last))
-    dp.add_handler(CommandHandler("stove_add", stove_add))
-    dp.add_handler(CommandHandler("house_payment", house_payment))
+    MENU_PAR = [
+        MessageHandler(Filters.regex("^Коммуналка$"), house_payment),
+        MessageHandler(Filters.regex("^Данные с счётчиков$"), print_csv),
+        MessageHandler(Filters.regex("^Плита помыта$"), stove_add),
+        MessageHandler(Filters.regex("^Когда мыли плиту$"), stove_last),
+    ]
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            MENU: MENU_PAR,
+            STOVEADD: MENU_PAR + [MessageHandler(Filters.text, stove_add_answer)],
+            HOUSE: MENU_PAR,
+            STOVE: MENU_PAR,
+            RATES: MENU_PAR
+            # CommandHandler('skip', skip_commentary)]
+        },
+        fallbacks=[ConversationHandler.END],
+    )
+
+    dp.add_handler(conv_handler)
+
+    # log all errors
+    dp.add_error_handler(error)
     updater.start_polling()
     updater.idle()
 
